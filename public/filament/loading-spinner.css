@@ -1,0 +1,31 @@
+.smsa-loading-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.12);
+    backdrop-filter: blur(0.5px);
+    z-index: 9999;
+    pointer-events: none;
+}
+
+.smsa-loading-overlay.is-visible {
+    display: flex;
+}
+
+.smsa-loading-spinner {
+    width: 34px;
+    height: 34px;
+    border-radius: 9999px;
+    border: 3px solid rgba(255, 255, 255, 0.35);
+    border-top-color: #f59e0b;
+    animation: smsa-spin 0.9s linear infinite;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+}
+
+@keyframes smsa-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

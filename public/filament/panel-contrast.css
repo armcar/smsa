@@ -1,0 +1,38 @@
+:root {
+    --smsa-workspace-bg: #e4ebf4;
+    --smsa-surface-bg: #ffffff;
+    --smsa-surface-alt-bg: #f5f8fc;
+    --smsa-surface-border: #c7d3e3;
+}
+
+.dark {
+    --smsa-workspace-bg: #070d18;
+    --smsa-surface-bg: #152033;
+    --smsa-surface-alt-bg: #1b2a42;
+    --smsa-surface-border: #30445f;
+}
+
+.fi-layout,
+.fi-main {
+    background-color: var(--smsa-workspace-bg);
+}
+
+.fi-section,
+.fi-ta-ctn,
+.fi-wi-widget,
+.fi-modal-window,
+.fi-fo,
+.fi-in-entry-item,
+.fi-ta-header-toolbar {
+    background-color: var(--smsa-surface-bg) !important;
+    border: 1px solid var(--smsa-surface-border) !important;
+}
+
+.fi-ta-header-toolbar,
+.fi-fo-component-ctn {
+    background-color: var(--smsa-surface-alt-bg) !important;
+}
+
+.fi-ta-record {
+    border-color: color-mix(in srgb, var(--smsa-surface-border) 70%, transparent);
+}
