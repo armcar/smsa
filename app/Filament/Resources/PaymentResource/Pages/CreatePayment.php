@@ -18,10 +18,4 @@ class CreatePayment extends CreateRecord
     {
         return 'Registo Inserido';
     }
-
-    protected function afterCreate(): void
-    {
-        $payment = $this->record;
-        $payment->quotaCharge?->update(['estado' => 'pago']);
-    }
 }

@@ -34,14 +34,6 @@ class EditPayment extends EditRecord
                 ->action(function (Payment $record): void {
                     $record->update(['anulado_em' => now()]);
 
-                    $hasActivePayment = $record->quotaCharge
-                        ? $record->quotaCharge->payments()->whereNull('anulado_em')->exists()
-                        : false;
-
-                    if ($record->quotaCharge && ! $hasActivePayment) {
-                        $record->quotaCharge->update(['estado' => 'pendente']);
-                    }
-
                     Notification::make()
                         ->title('Pagamento anulado com sucesso.')
                         ->success()

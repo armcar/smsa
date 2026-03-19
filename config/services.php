@@ -38,6 +38,10 @@ return [
     'wp_bridge' => [
         'token' => env('WP_LARAVEL_BRIDGE_TOKEN', ''),
         'verify_ssl' => env('WP_BRIDGE_VERIFY_SSL', true),
+        'allowed_callback_hosts' => array_values(array_filter(array_map(
+            static fn (string $host): string => trim($host),
+            explode(',', (string) env('WP_BRIDGE_ALLOWED_CALLBACK_HOSTS', ''))
+        ))),
     ],
 
 ];

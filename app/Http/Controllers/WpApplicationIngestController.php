@@ -23,7 +23,26 @@ class WpApplicationIngestController extends Controller
             'external_id' => ['required', 'string', 'max:64'],
             'submitted_at' => ['nullable', 'date'],
             'payload' => ['required', 'array'],
-            'wp_status_callback_url' => ['nullable', 'url', 'max:500'],
+            'wp_status_callback_url' => [
+                'nullable',
+                'url',
+                'max:500',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! is_string($value) || $value === '') {
+                        return;
+                    }
+
+                    $allowedHosts = (array) config('services.wp_bridge.allowed_callback_hosts', []);
+                    if ($allowedHosts === []) {
+                        return;
+                    }
+
+                    $host = parse_url($value, PHP_URL_HOST);
+                    if (! is_string($host) || ! in_array(mb_strtolower($host), array_map('mb_strtolower', $allowedHosts), true)) {
+                        $fail('Callback URL host is not allowed.');
+                    }
+                },
+            ],
         ]);
 
         $displayName = $this->extractDisplayName($data['kind'], $data['payload']);

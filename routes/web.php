@@ -13,6 +13,7 @@ Route::get('/', function () {
 
 Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/admin/receipts/{receipt}/download', [ReceiptController::class, 'download'])
+        ->middleware('signed')
         ->name('receipts.download');
 });
 

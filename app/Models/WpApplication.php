@@ -238,6 +238,14 @@ class WpApplication extends Model
             return;
         }
 
+        if (! $this->isAllowedCallbackUrl($this->wp_status_callback_url)) {
+            $this->forceFill([
+                'last_callback_at' => now(),
+                'last_callback_response' => 'ERROR Callback host is not allowed by WP_BRIDGE_ALLOWED_CALLBACK_HOSTS',
+            ])->save();
+            return;
+        }
+
         $token = (string) config('services.wp_bridge.token');
         if ($token === '') {
             return;
@@ -273,5 +281,20 @@ class WpApplication extends Model
             'last_callback_at' => now(),
             'last_callback_response' => $callbackResult,
         ])->save();
+    }
+
+    private function isAllowedCallbackUrl(string $url): bool
+    {
+        $allowedHosts = (array) config('services.wp_bridge.allowed_callback_hosts', []);
+        if ($allowedHosts === []) {
+            return true;
+        }
+
+        $host = parse_url($url, PHP_URL_HOST);
+        if (! is_string($host) || $host === '') {
+            return false;
+        }
+
+        return in_array(mb_strtolower($host), array_map('mb_strtolower', $allowedHosts), true);
     }
 }

@@ -223,8 +223,6 @@ class QuotaChargeResource extends Resource
                             'notas' => $data['notas'] ?? null,
                         ]);
 
-                        $record->update(['estado' => 'pago']);
-
                         Notification::make()
                             ->title('Pagamento registado')
                             ->success()

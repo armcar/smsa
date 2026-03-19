@@ -31,6 +31,7 @@ use Filament\Notifications\Notification;
 use Filament\Notifications\Actions\Action as NotificationAction;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\URL;
 
 class PaymentResource extends Resource
 {
@@ -72,6 +73,7 @@ class PaymentResource extends Resource
                 ->searchable()
                 ->preload()
                 ->required()
+                ->disabled(fn (string $operation): bool => $operation === 'edit')
                 ->live(),
 
             Placeholder::make('quota_info')
@@ -245,7 +247,7 @@ class PaymentResource extends Resource
                             ->actions([
                                 NotificationAction::make('download')
                                     ->label('Download PDF')
-                                    ->url(route('receipts.download', $receipt))
+                                    ->url(URL::signedRoute('receipts.download', ['receipt' => $receipt]))
                                     ->openUrlInNewTab(),
                             ])
                             ->send();
@@ -289,15 +291,13 @@ class PaymentResource extends Resource
                             ->actions([
                                 NotificationAction::make('download')
                                     ->label('Download PDF')
-                                    ->url(route('receipts.download', $receipt))
+                                    ->url(URL::signedRoute('receipts.download', ['receipt' => $receipt]))
                                     ->openUrlInNewTab(),
                             ])
                             ->send();
                     }),
             ])
-            ->bulkActions([
-                Tables\Actions\DeleteBulkAction::make(),
-            ]);
+            ->bulkActions([]);
     }
 
     public static function getPages(): array

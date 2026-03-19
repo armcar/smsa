@@ -329,7 +329,7 @@ class WpApplicationResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query) => $query->where('status', 'pendente')->latest('id'))
+            ->modifyQueryUsing(fn (Builder $query) => $query->latest('id'))
             ->columns([
                 TextColumn::make('id')
                     ->sortable(),

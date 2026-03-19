@@ -112,4 +112,14 @@ class QuotaCharge extends Model
     {
         $this->update(['estado' => 'pendente']);
     }
+
+    public function syncEstadoFromPayments(): void
+    {
+        $hasActivePayment = $this->payments()->whereNull('anulado_em')->exists();
+        $expected = $hasActivePayment ? 'pago' : 'pendente';
+
+        if ($this->estado !== $expected) {
+            $this->update(['estado' => $expected]);
+        }
+    }
 }
