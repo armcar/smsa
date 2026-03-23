@@ -55,6 +55,11 @@ class QuotaCharge extends Model
         return $this->hasMany(Payment::class, 'quota_charge_id');
     }
 
+    public function activePayments(): HasMany
+    {
+        return $this->payments()->whereNull('anulado_em');
+    }
+
     public function payment(): HasOne
     {
         return $this->hasOne(Payment::class, 'quota_charge_id')
@@ -89,15 +94,53 @@ class QuotaCharge extends Model
      */
     public function isPaga(): bool
     {
-        return $this->estado === 'pago';
+        return $this->estadoDerivado() === 'pago';
     }
 
     public function paymentAtivo(): ?Payment
     {
-        return $this->payments()
-            ->whereNull('anulado_em')
+        return $this->activePayments()
             ->latest('data_pagamento')
             ->first();
+    }
+
+    public function totalPago(): float
+    {
+        if (array_key_exists('total_pago_ativo', $this->attributes)) {
+            return round((float) $this->attributes['total_pago_ativo'], 2);
+        }
+
+        if ($this->relationLoaded('payments')) {
+            return round(
+                (float) $this->payments
+                    ->whereNull('anulado_em')
+                    ->sum('valor'),
+                2
+            );
+        }
+
+        return round((float) $this->activePayments()->sum('valor'), 2);
+    }
+
+    public function valorEmDivida(): float
+    {
+        return round(max((float) $this->valor - $this->totalPago(), 0), 2);
+    }
+
+    public function estadoDerivado(): string
+    {
+        $totalPago = $this->totalPago();
+        $valorDevido = (float) $this->valor;
+
+        if ($totalPago <= 0) {
+            return 'pendente';
+        }
+
+        if ($totalPago < $valorDevido) {
+            return 'parcial';
+        }
+
+        return 'pago';
     }
 
     /**
@@ -115,11 +158,10 @@ class QuotaCharge extends Model
 
     public function syncEstadoFromPayments(): void
     {
-        $hasActivePayment = $this->payments()->whereNull('anulado_em')->exists();
-        $expected = $hasActivePayment ? 'pago' : 'pendente';
+        $expected = $this->estadoDerivado();
 
         if ($this->estado !== $expected) {
-            $this->update(['estado' => $expected]);
+            $this->forceFill(['estado' => $expected])->save();
         }
     }
 }

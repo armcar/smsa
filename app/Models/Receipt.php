@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\DB;
 
@@ -14,12 +15,16 @@ class Receipt extends Model
         'sequencia',
         'member_id',
         'quota_year_id',
+        'payment_id',
         'valor',
         'data_pagamento',
+        'anulado_em',
+        'motivo_anulacao',
     ];
 
     protected $casts = [
         'data_pagamento' => 'date',
+        'anulado_em' => 'datetime',
         'valor' => 'decimal:2',
         'ano' => 'integer',
         'sequencia' => 'integer',
@@ -34,6 +39,26 @@ class Receipt extends Model
     public function quotaYear(): BelongsTo
     {
         return $this->belongsTo(QuotaYear::class);
+    }
+
+    public function payment(): BelongsTo
+    {
+        return $this->belongsTo(Payment::class);
+    }
+
+    public function scopeAtivos(Builder $query): Builder
+    {
+        return $query->whereNull('anulado_em');
+    }
+
+    public function scopeAnulados(Builder $query): Builder
+    {
+        return $query->whereNotNull('anulado_em');
+    }
+
+    public function isAnulado(): bool
+    {
+        return $this->anulado_em !== null;
     }
 
     public static function gerarNumeroSeguro(int $ano): array

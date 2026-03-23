@@ -40,7 +40,7 @@ class PaymentResource extends Resource
     protected static ?string $navigationLabel = 'Pagamentos';
     protected static ?string $modelLabel = 'Pagamento';
     protected static ?string $pluralModelLabel = 'Pagamentos';
-    protected static ?string $navigationGroup = '💰 Tesouraria';
+    protected static ?string $navigationGroup = 'Tesouraria';
     protected static ?string $navigationIcon = 'heroicon-o-banknotes';
     protected static ?int $navigationSort = 3;
 
@@ -125,9 +125,16 @@ class PaymentResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn (Builder $query) => $query->with(['receipt']))
             ->columns([
                 TextColumn::make('quotaCharge.socio.nome')->label('Sócio')->searchable(),
                 TextColumn::make('quotaCharge.quotaYear.ano')->label('Ano')->sortable(),
+                TextColumn::make('estado_pagamento')
+                    ->label('Estado')
+                    ->state(fn (Payment $record): string => $record->anulado_em ? 'anulado' : 'ativo')
+                    ->badge()
+                    ->color(fn (string $state): string => $state === 'anulado' ? 'danger' : 'success')
+                    ->formatStateUsing(fn (string $state): string => $state === 'anulado' ? 'Anulado' : 'Ativo'),
 
                 TextColumn::make('metodo')
                     ->label('Método')
@@ -141,6 +148,27 @@ class PaymentResource extends Resource
 
                 TextColumn::make('valor')->money('EUR', locale: 'pt_PT')->sortable(),
                 TextColumn::make('data_pagamento')->label('Pago em')->date('d-m-Y')->sortable(),
+                TextColumn::make('estado_recibo')
+                    ->label('Recibo')
+                    ->state(function (Payment $record): string {
+                        $receipt = $record->receipt;
+                        if (! $receipt) {
+                            return 'nao_emitido';
+                        }
+
+                        return $receipt->anulado_em ? 'anulado' : 'emitido';
+                    })
+                    ->badge()
+                    ->color(fn (string $state): string => match ($state) {
+                        'emitido' => 'success',
+                        'anulado' => 'danger',
+                        default => 'gray',
+                    })
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        'emitido' => 'Emitido',
+                        'anulado' => 'Anulado',
+                        default => 'Não emitido',
+                    }),
                 TextColumn::make('anulado_em')
                     ->label('Anulado em')
                     ->dateTime('d-m-Y H:i')
@@ -216,30 +244,31 @@ class PaymentResource extends Resource
                     ->modalHeading('Emitir recibo')
                     ->modalDescription('Gera o recibo e envia o PDF por email ao sócio.')
                     ->visible(function ($record) {
+                        if (! empty($record->anulado_em)) return false;
                         if (empty($record->data_pagamento)) return false;
 
                         $qc = $record->quotaCharge?->loadMissing(['socio', 'quotaYear']);
                         if (! $qc || ! $qc->socio || ! $qc->quotaYear) return false;
 
-                        return ! \App\Models\Receipt::where('member_id', $qc->socio->id)
-                            ->where('quota_year_id', $qc->quotaYear->id)
+                        return ! \App\Models\Receipt::where('payment_id', $record->id)
                             ->exists();
                     })
                     ->action(function ($record) {
-                        $quotaCharge = $record->quotaCharge?->loadMissing(['socio', 'quotaYear']);
-
-                        if (! $quotaCharge || ! $quotaCharge->socio || ! $quotaCharge->quotaYear) {
+                        if (! $record->quotaCharge?->loadMissing(['socio', 'quotaYear'])) {
                             Notification::make()->title('Pagamento sem quota/sócio/ano associado.')->danger()->send();
                             return;
                         }
 
-                        $receipt = app(ReceiptService::class)->emitirEEnviar(
-                            socio: $quotaCharge->socio,
-                            quotaYear: $quotaCharge->quotaYear,
-                            emailDestino: null,
-                            dataPagamento: $record->data_pagamento,
-                            forceSendEmail: true
-                        );
+                        try {
+                            $receipt = app(ReceiptService::class)->emitirEEnviar(
+                                payment: $record,
+                                emailDestino: null,
+                                forceSendEmail: true
+                            );
+                        } catch (\RuntimeException $e) {
+                            Notification::make()->title($e->getMessage())->danger()->send();
+                            return;
+                        }
 
                         Notification::make()
                             ->title('Recibo ' . $receipt->numero . ' emitido/enviado.')
@@ -260,13 +289,14 @@ class PaymentResource extends Resource
                     ->modalHeading('Reenviar recibo')
                     ->modalDescription('Reenvia o recibo por email (sem criar novo número).')
                     ->visible(function ($record) {
+                        if (! empty($record->anulado_em)) return false;
                         if (empty($record->data_pagamento)) return false;
 
                         $qc = $record->quotaCharge?->loadMissing(['socio', 'quotaYear']);
                         if (! $qc || ! $qc->socio || ! $qc->quotaYear) return false;
 
-                        return \App\Models\Receipt::where('member_id', $qc->socio->id)
-                            ->where('quota_year_id', $qc->quotaYear->id)
+                        return \App\Models\Receipt::where('payment_id', $record->id)
+                            ->whereNull('anulado_em')
                             ->exists();
                     })
                     ->action(function ($record) {
@@ -277,13 +307,16 @@ class PaymentResource extends Resource
                             return;
                         }
 
-                        $receipt = app(ReceiptService::class)->emitirEEnviar(
-                            socio: $quotaCharge->socio,
-                            quotaYear: $quotaCharge->quotaYear,
-                            emailDestino: $quotaCharge->socio->email ?? null,
-                            dataPagamento: $record->data_pagamento,
-                            forceSendEmail: true
-                        );
+                        try {
+                            $receipt = app(ReceiptService::class)->emitirEEnviar(
+                                payment: $record,
+                                emailDestino: $quotaCharge->socio->email ?? null,
+                                forceSendEmail: true
+                            );
+                        } catch (\RuntimeException $e) {
+                            Notification::make()->title($e->getMessage())->danger()->send();
+                            return;
+                        }
 
                         Notification::make()
                             ->title('Recibo reenviado: ' . $receipt->numero)

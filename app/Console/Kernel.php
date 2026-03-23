@@ -10,10 +10,7 @@ class Kernel extends ConsoleKernel
 {
     protected function schedule(Schedule $schedule): void
     {
-        $schedule->command('app:keep-admin-warm')
-            ->everyFiveMinutes()
-            ->withoutOverlapping()
-            ->runInBackground();
+        // Scheduler definido em routes/console.php (Laravel 12 skeleton).
     }
 
     protected function commands(): void

@@ -13,12 +13,19 @@ return new class extends Migration
             return;
         }
 
-        $hasUnique = collect(DB::select('SHOW INDEX FROM payments WHERE Key_name = ?', [
-            'payments_quota_charge_id_unique',
-        ]))->isNotEmpty();
+        $hasUnique = false;
+
+        if (DB::getDriverName() === 'sqlite') {
+            $indexes = collect(DB::select("PRAGMA index_list('payments')"));
+            $hasUnique = $indexes->contains(fn ($idx): bool => (string) ($idx->name ?? '') === 'payments_quota_charge_id_unique');
+        } else {
+            $hasUnique = collect(DB::select('SHOW INDEX FROM payments WHERE Key_name = ?', [
+                'payments_quota_charge_id_unique',
+            ]))->isNotEmpty();
+        }
 
         if ($hasUnique) {
-            Schema::table('payments', function (Blueprint $table) {
+            Schema::table('payments', function (Blueprint $table): void {
                 $table->dropUnique('payments_quota_charge_id_unique');
             });
         }
@@ -26,7 +33,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('payments', function (Blueprint $table) {
+        Schema::table('payments', function (Blueprint $table): void {
             $table->unique('quota_charge_id');
         });
     }

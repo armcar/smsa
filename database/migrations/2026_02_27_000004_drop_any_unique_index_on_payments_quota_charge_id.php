@@ -12,14 +12,11 @@ return new class extends Migration
             return;
         }
 
-        $foreignKeys = DB::select("
-            SELECT DISTINCT CONSTRAINT_NAME
-            FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
-            WHERE TABLE_SCHEMA = DATABASE()
-              AND TABLE_NAME = 'payments'
-              AND COLUMN_NAME = 'quota_charge_id'
-              AND REFERENCED_TABLE_NAME IS NOT NULL
-        ");
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
+        $foreignKeys = DB::select("\n            SELECT DISTINCT CONSTRAINT_NAME\n            FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE\n            WHERE TABLE_SCHEMA = DATABASE()\n              AND TABLE_NAME = 'payments'\n              AND COLUMN_NAME = 'quota_charge_id'\n              AND REFERENCED_TABLE_NAME IS NOT NULL\n        ");
 
         foreach ($foreignKeys as $fk) {
             $fkName = $fk->CONSTRAINT_NAME ?? null;
@@ -28,14 +25,7 @@ return new class extends Migration
             }
         }
 
-        $indexes = DB::select("
-            SELECT DISTINCT INDEX_NAME
-            FROM INFORMATION_SCHEMA.STATISTICS
-            WHERE TABLE_SCHEMA = DATABASE()
-              AND TABLE_NAME = 'payments'
-              AND COLUMN_NAME = 'quota_charge_id'
-              AND NON_UNIQUE = 0
-        ");
+        $indexes = DB::select("\n            SELECT DISTINCT INDEX_NAME\n            FROM INFORMATION_SCHEMA.STATISTICS\n            WHERE TABLE_SCHEMA = DATABASE()\n              AND TABLE_NAME = 'payments'\n              AND COLUMN_NAME = 'quota_charge_id'\n              AND NON_UNIQUE = 0\n        ");
 
         foreach ($indexes as $index) {
             $name = $index->INDEX_NAME ?? null;
@@ -45,16 +35,11 @@ return new class extends Migration
         }
 
         DB::statement("ALTER TABLE `payments` ADD INDEX `payments_quota_charge_id_index` (`quota_charge_id`)");
-        DB::statement("
-            ALTER TABLE `payments`
-            ADD CONSTRAINT `payments_quota_charge_id_foreign`
-            FOREIGN KEY (`quota_charge_id`) REFERENCES `quota_charges`(`id`)
-            ON DELETE CASCADE
-        ");
+        DB::statement("\n            ALTER TABLE `payments`\n            ADD CONSTRAINT `payments_quota_charge_id_foreign`\n            FOREIGN KEY (`quota_charge_id`) REFERENCES `quota_charges`(`id`)\n            ON DELETE CASCADE\n        ");
     }
 
     public function down(): void
     {
-        // Intencionalmente sem recriar UNIQUE: o modelo atual permite histórico de pagamentos.
+        // Intencionalmente sem recriar UNIQUE: o modelo atual permite historico de pagamentos.
     }
 };

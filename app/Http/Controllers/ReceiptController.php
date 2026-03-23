@@ -14,7 +14,7 @@ class ReceiptController extends Controller
         abort_unless((bool) $request->user()?->is_admin, 403);
 
         $pdf = Pdf::loadView('pdf.receipt', [
-            'receipt' => $receipt->load(['member', 'quotaYear']),
+            'receipt' => $receipt->load(['member', 'quotaYear', 'payment.quotaCharge']),
         ])->setPaper('a4');
 
         $filename = 'Recibo_' . str_replace('/', '-', $receipt->numero) . '.pdf';

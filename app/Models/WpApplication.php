@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Services\SocioNumberService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class WpApplication extends Model
 {
@@ -14,6 +17,7 @@ class WpApplication extends Model
         'source',
         'kind',
         'external_id',
+        'payload_hash',
         'imported_socio_id',
         'target_socio_type_code',
         'target_num_socio',
@@ -54,6 +58,8 @@ class WpApplication extends Model
 
         $payload = (array) $this->payload;
         $nome = trim((string) $this->resolveNameFromPayload($payload));
+        $nif = $this->resolveNifFromPayload($payload);
+
         if ($nome === '') {
             $this->appendResolutionNote('Auto-criacao de socio falhou: nome em falta no payload.');
             return;
@@ -77,6 +83,11 @@ class WpApplication extends Model
                 })
                 ->first();
         }
+        if (! $existing && $nif !== null) {
+            $existing = Socio::query()
+                ->where('numero_fiscal', $nif)
+                ->first();
+        }
 
         if ($existing) {
             $this->imported_socio_id = $existing->id;
@@ -92,22 +103,6 @@ class WpApplication extends Model
             return;
         }
 
-        $targetNumber = (int) ($this->target_num_socio ?? 999);
-        if ($targetNumber <= 0) {
-            $targetNumber = 999;
-        }
-
-        $numberInUse = Socio::query()
-            ->where('socio_type_id', $tipo->id)
-            ->where('num_socio', $targetNumber)
-            ->exists();
-        if ($numberInUse) {
-            $this->appendResolutionNote("Auto-criacao de socio bloqueada: numero de socio {$targetNumber} ja existe.");
-            $this->save();
-            return;
-        }
-
-        $nif = $this->resolveNifFromPayload($payload);
         if ($nif === null) {
             $this->appendResolutionNote('Auto-criacao de socio bloqueada: NIF em falta/invalidado no pedido WP.');
             $this->save();
@@ -116,33 +111,67 @@ class WpApplication extends Model
 
         $instrumento = trim((string) ($this->resolvePayloadValue($payload, ['instrumento'], '') ?? ''));
         $isInstrumentista = $instrumento !== '';
+        $requestedNumber = (int) ($this->target_num_socio ?? 0);
+        $resolvedTargetNumber = 0;
 
         try {
-            $socio = Socio::query()->create([
-                'socio_type_id' => $tipo->id,
-                'num_socio' => $targetNumber,
-                'nome' => $nome,
-                'morada' => $this->resolvePayloadValue($payload, ['morada', 'aluno_morada']),
-                'codigo_postal' => $this->resolvePayloadValue($payload, ['codigo_postal', 'cod_postal', 'aluno_cod_postal']),
-                'localidade' => $this->resolvePayloadValue($payload, ['localidade', 'aluno_localidade']),
-                'telefone' => $this->resolvePayloadValue($payload, ['telefone', 'aluno_telefone']),
-                'telemovel' => $this->resolvePayloadValue($payload, ['telemovel', 'aluno_telemovel']),
-                'data_nascimento' => $this->resolvePayloadValue($payload, ['data_nascimento', 'data_nasc', 'aluno_data_nascimento', 'aluno_data_nasc']),
-                'numero_fiscal' => $nif,
-                'email' => $email !== '' ? $email : null,
-                'data_socio' => now()->toDateString(),
-                'estado' => 'ativo',
-                'is_instrumentista' => $isInstrumentista,
-                'instrumento' => $isInstrumentista ? $instrumento : null,
-                'instrumento_desde' => null,
-                'instrumento_ate' => null,
-            ]);
+            $socio = DB::transaction(function () use (
+                $tipo,
+                $requestedNumber,
+                $nome,
+                $payload,
+                $nif,
+                $email,
+                $isInstrumentista,
+                $instrumento,
+                &$resolvedTargetNumber
+            ) {
+                $targetNumber = $requestedNumber > 0 ? $requestedNumber : null;
+
+                if ($targetNumber !== null) {
+                    $numberInUse = Socio::query()
+                        ->where('socio_type_id', $tipo->id)
+                        ->where('num_socio', $targetNumber)
+                        ->lockForUpdate()
+                        ->exists();
+
+                    if ($numberInUse) {
+                        $targetNumber = null;
+                    }
+                }
+
+                if ($targetNumber === null) {
+                    $targetNumber = app(SocioNumberService::class)->getNextNumberForType($tipo->id);
+                }
+
+                $resolvedTargetNumber = $targetNumber;
+
+                return Socio::query()->create([
+                    'socio_type_id' => $tipo->id,
+                    'num_socio' => $targetNumber,
+                    'nome' => $nome,
+                    'morada' => $this->resolvePayloadValue($payload, ['morada', 'aluno_morada']),
+                    'codigo_postal' => $this->resolvePayloadValue($payload, ['codigo_postal', 'cod_postal', 'aluno_cod_postal']),
+                    'localidade' => $this->resolvePayloadValue($payload, ['localidade', 'aluno_localidade']),
+                    'telefone' => $this->resolvePayloadValue($payload, ['telefone', 'aluno_telefone']),
+                    'telemovel' => $this->resolvePayloadValue($payload, ['telemovel', 'aluno_telemovel']),
+                    'data_nascimento' => $this->resolvePayloadValue($payload, ['data_nascimento', 'data_nasc', 'aluno_data_nascimento', 'aluno_data_nasc']),
+                    'numero_fiscal' => $nif,
+                    'email' => $email !== '' ? $email : null,
+                    'data_socio' => now()->toDateString(),
+                    'estado' => 'ativo',
+                    'is_instrumentista' => $isInstrumentista,
+                    'instrumento' => $isInstrumentista ? $instrumento : null,
+                    'instrumento_desde' => null,
+                    'instrumento_ate' => null,
+                ]);
+            }, 3);
         } catch (QueryException $e) {
             $sqlState = (string) ($e->errorInfo[0] ?? '');
             $errorCode = (string) ($e->errorInfo[1] ?? '');
 
             if ($sqlState === '23000' || $errorCode === '1062') {
-                $this->appendResolutionNote("Auto-criacao de socio bloqueada: numero de socio {$targetNumber} ja existe.");
+                $this->appendResolutionNote('Auto-criacao de socio bloqueada: conflito de unicidade na numeracao.');
                 $this->save();
                 return;
             }
@@ -156,6 +185,10 @@ class WpApplication extends Model
             $this->save();
             report($e);
             return;
+        }
+
+        if ($requestedNumber > 0 && $requestedNumber !== $resolvedTargetNumber) {
+            $this->appendResolutionNote("Numero pedido {$requestedNumber} indisponivel; atribuido automaticamente {$resolvedTargetNumber}.");
         }
 
         $this->imported_socio_id = $socio->id;
@@ -239,6 +272,11 @@ class WpApplication extends Model
         }
 
         if (! $this->isAllowedCallbackUrl($this->wp_status_callback_url)) {
+            Log::warning('WP callback blocked: host not allowed.', [
+                'wp_application_id' => $this->id,
+                'callback_url' => $this->wp_status_callback_url,
+            ]);
+
             $this->forceFill([
                 'last_callback_at' => now(),
                 'last_callback_response' => 'ERROR Callback host is not allowed by WP_BRIDGE_ALLOWED_CALLBACK_HOSTS',
@@ -248,10 +286,20 @@ class WpApplication extends Model
 
         $token = (string) config('services.wp_bridge.token');
         if ($token === '') {
+            Log::warning('WP callback skipped: token not configured.', [
+                'wp_application_id' => $this->id,
+            ]);
+
             return;
         }
 
         try {
+            Log::info('WP callback sending.', [
+                'wp_application_id' => $this->id,
+                'status' => $this->status,
+                'callback_url' => $this->wp_status_callback_url,
+            ]);
+
             $response = Http::timeout(10)
                 ->withOptions([
                     'verify' => (bool) config('services.wp_bridge.verify_ssl', true),
@@ -271,10 +319,20 @@ class WpApplication extends Model
                 ]);
 
             $callbackResult = 'HTTP ' . $response->status() . ' ' . mb_substr((string) $response->body(), 0, 1000);
+
+            Log::info('WP callback sent.', [
+                'wp_application_id' => $this->id,
+                'http_status' => $response->status(),
+            ]);
         } catch (\Throwable $e) {
             report($e);
 
             $callbackResult = 'ERROR ' . class_basename($e) . ': ' . mb_substr($e->getMessage(), 0, 1000);
+
+            Log::error('WP callback failed.', [
+                'wp_application_id' => $this->id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         $this->forceFill([

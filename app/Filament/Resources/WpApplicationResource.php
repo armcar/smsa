@@ -222,12 +222,12 @@ class WpApplicationResource extends Resource
                     ->helperText(function (Get $get, ?WpApplication $record): string {
                         $value = $get('target_num_socio');
                         if ($value === null || $value === '') {
-                            return 'Default: 999 (podes alterar antes de validar).';
+                            return 'Se vazio, o sistema atribui automaticamente o proximo numero disponivel.';
                         }
 
                         $number = (int) $value;
                         if ($number <= 0) {
-                            return 'Default: 999 (podes alterar antes de validar).';
+                            return 'Se vazio, o sistema atribui automaticamente o proximo numero disponivel.';
                         }
 
                         $targetCode = strtoupper((string) ($get('target_socio_type_code') ?: ($record?->kind === 'escola' ? 'A' : 'B')));

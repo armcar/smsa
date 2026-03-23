@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\WpApplicationResource\Pages;
 
 use App\Filament\Resources\WpApplicationResource;
+use App\Models\SocioType;
+use App\Services\SocioNumberService;
 use Filament\Resources\Pages\EditRecord;
 
 class EditWpApplication extends EditRecord
@@ -20,7 +22,8 @@ class EditWpApplication extends EditRecord
         }
 
         if (empty($data['target_num_socio'])) {
-            $data['target_num_socio'] = 999;
+            $code = strtoupper((string) ($data['target_socio_type_code'] ?? ($kind === 'escola' ? 'A' : 'B')));
+            $data['target_num_socio'] = $this->nextTargetNumber($code);
         }
 
         return $data;
@@ -48,5 +51,16 @@ class EditWpApplication extends EditRecord
         if ($this->previousStatus !== $this->record->status) {
             $this->record->syncStatusBackToWordPress();
         }
+    }
+
+    private function nextTargetNumber(string $targetCode): int
+    {
+        $type = SocioType::query()->where('code', $targetCode)->first();
+
+        if (! $type) {
+            return 1;
+        }
+
+        return app(SocioNumberService::class)->getNextNumberForType($type->id);
     }
 }

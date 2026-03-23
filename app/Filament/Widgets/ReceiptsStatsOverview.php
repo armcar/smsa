@@ -14,11 +14,11 @@ class ReceiptsStatsOverview extends BaseWidget
     {
         $ano = (int) now()->format('Y');
 
-        $countAno = Receipt::where('ano', $ano)->count();
-        $sumAno = (float) Receipt::where('ano', $ano)->sum('valor');
+        $countAno = Receipt::ativos()->where('ano', $ano)->count();
+        $sumAno = (float) Receipt::ativos()->where('ano', $ano)->sum('valor');
 
-        $countTotal = Receipt::count();
-        $sumTotal = (float) Receipt::sum('valor');
+        $countTotal = Receipt::ativos()->count();
+        $sumTotal = (float) Receipt::ativos()->sum('valor');
 
         return [
             Stat::make("Recibos ($ano)", $countAno),

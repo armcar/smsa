@@ -3,35 +3,46 @@
 namespace App\Services;
 
 use App\Mail\ReceiptPaidMail;
-use App\Models\QuotaYear;
+use App\Models\Payment;
 use App\Models\Receipt;
-use App\Models\Socio;
 use Barryvdh\DomPDF\Facade\Pdf;
-use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 
 class ReceiptService
 {
     /**
-     * - 1 recibo por (sócio + quotaYear)
-     * - data do recibo = dataPagamento (do Payment)
+     * - 1 recibo por pagamento (payment_id)
      * - forceSendEmail=true reenvia email mesmo se o recibo já existir
      */
     public function emitirEEnviar(
-        Socio $socio,
-        QuotaYear $quotaYear,
+        Payment $payment,
         ?string $emailDestino = null,
-        ?CarbonInterface $dataPagamento = null,
         bool $forceSendEmail = false
     ): Receipt {
+        $payment->loadMissing(['quotaCharge.socio', 'quotaCharge.quotaYear']);
+        $quotaCharge = $payment->quotaCharge;
+        $socio = $quotaCharge?->socio;
+        $quotaYear = $quotaCharge?->quotaYear;
 
-        $existente = Receipt::where('member_id', $socio->id)
-            ->where('quota_year_id', $quotaYear->id)
+        if ($payment->anulado_em !== null) {
+            throw new \RuntimeException('Não é possível emitir/reenviar recibo para pagamento anulado.');
+        }
+
+        if (! $quotaCharge || ! $socio || ! $quotaYear) {
+            throw new \RuntimeException('Pagamento sem quota/sócio/ano associado.');
+        }
+
+        $existente = Receipt::query()
+            ->where('payment_id', $payment->id)
             ->first();
 
         if ($existente) {
-            $existente->load(['member', 'quotaYear']);
+            if ($existente->anulado_em !== null) {
+                throw new \RuntimeException('O recibo deste pagamento encontra-se anulado.');
+            }
+
+            $existente->load(['member', 'quotaYear', 'payment.quotaCharge']);
 
             if ($forceSendEmail) {
                 $this->enviarEmail($existente, $emailDestino);
@@ -40,10 +51,32 @@ class ReceiptService
             return $existente;
         }
 
-        $anoEmissao = (int) now()->format('Y');
-        $dataPagamentoStr = ($dataPagamento ?: now())->toDateString();
+        // Compatibilidade: recibos antigos não têm payment_id e podem já existir por sócio+ano.
+        $legacy = Receipt::query()
+            ->whereNull('payment_id')
+            ->where('member_id', $socio->id)
+            ->where('quota_year_id', $quotaYear->id)
+            ->first();
 
-        $receipt = DB::transaction(function () use ($socio, $quotaYear, $anoEmissao, $dataPagamentoStr) {
+        if ($legacy) {
+            $legacy->payment_id = $payment->id;
+            $legacy->valor = (string) $payment->valor;
+            $legacy->data_pagamento = $payment->data_pagamento;
+            $legacy->save();
+
+            $legacy->load(['member', 'quotaYear', 'payment.quotaCharge']);
+
+            if ($forceSendEmail) {
+                $this->enviarEmail($legacy, $emailDestino);
+            }
+
+            return $legacy;
+        }
+
+        $anoEmissao = (int) now()->format('Y');
+        $dataPagamentoStr = $payment->data_pagamento?->toDateString() ?? now()->toDateString();
+
+        $receipt = DB::transaction(function () use ($payment, $socio, $quotaYear, $anoEmissao, $dataPagamentoStr) {
             $dados = Receipt::gerarNumeroSeguro($anoEmissao);
 
             return Receipt::create([
@@ -52,12 +85,13 @@ class ReceiptService
                 'sequencia' => $dados['sequencia'],
                 'member_id' => $socio->id,
                 'quota_year_id' => $quotaYear->id,
-                'valor' => (string) $quotaYear->valor,
+                'payment_id' => $payment->id,
+                'valor' => (string) $payment->valor,
                 'data_pagamento' => $dataPagamentoStr,
             ]);
         }, 3);
 
-        $receipt->load(['member', 'quotaYear']);
+        $receipt->load(['member', 'quotaYear', 'payment.quotaCharge']);
 
         $this->enviarEmail($receipt, $emailDestino);
 

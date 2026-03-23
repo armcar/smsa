@@ -9,11 +9,11 @@
     <p>Olá {{ $receipt->member->nome ?? 'Sócio' }},</p>
 
     <p>
-        Confirmamos o pagamento da quota do ano <strong>{{ $receipt->ano }}</strong>.
+        Confirmamos o pagamento da quota do ano <strong>{{ $receipt->quotaYear->ano ?? '—' }}</strong>.
     </p>
 
     <p>
-        Em anexo segue o recibo <strong>{{ $receipt->numero }}</strong>.
+        Em anexo segue o recibo <strong>{{ $receipt->numero }}</strong> (emissão {{ $receipt->ano }}).
     </p>
 
     <p>

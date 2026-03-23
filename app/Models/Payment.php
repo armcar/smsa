@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Payment extends Model
 {
@@ -28,25 +29,47 @@ class Payment extends Model
     protected static function booted(): void
     {
         static::created(function (Payment $payment): void {
-            $payment->quotaCharge?->syncEstadoFromPayments();
+            self::syncQuotaCharge((int) $payment->quota_charge_id);
         });
 
         static::updated(function (Payment $payment): void {
-            $originalQuotaChargeId = $payment->getOriginal('quota_charge_id');
-            if ($originalQuotaChargeId && (int) $originalQuotaChargeId !== (int) $payment->quota_charge_id) {
-                QuotaCharge::query()->find($originalQuotaChargeId)?->syncEstadoFromPayments();
+            if (! $payment->wasChanged(['quota_charge_id', 'valor', 'anulado_em'])) {
+                return;
             }
 
-            $payment->quotaCharge?->syncEstadoFromPayments();
+            $originalQuotaChargeId = (int) ($payment->getOriginal('quota_charge_id') ?? 0);
+            $currentQuotaChargeId = (int) ($payment->quota_charge_id ?? 0);
+
+            if ($originalQuotaChargeId > 0) {
+                self::syncQuotaCharge($originalQuotaChargeId);
+            }
+
+            if ($currentQuotaChargeId > 0 && $currentQuotaChargeId !== $originalQuotaChargeId) {
+                self::syncQuotaCharge($currentQuotaChargeId);
+            }
         });
 
         static::deleted(function (Payment $payment): void {
-            QuotaCharge::query()->find($payment->quota_charge_id)?->syncEstadoFromPayments();
+            self::syncQuotaCharge((int) $payment->quota_charge_id);
         });
+    }
+
+    private static function syncQuotaCharge(int $quotaChargeId): void
+    {
+        if ($quotaChargeId <= 0) {
+            return;
+        }
+
+        QuotaCharge::query()->find($quotaChargeId)?->syncEstadoFromPayments();
     }
 
     public function quotaCharge(): BelongsTo
     {
         return $this->belongsTo(QuotaCharge::class);
+    }
+
+    public function receipt(): HasOne
+    {
+        return $this->hasOne(Receipt::class, 'payment_id');
     }
 }

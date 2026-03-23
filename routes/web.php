@@ -18,4 +18,5 @@ Route::middleware(['web', 'auth'])->group(function () {
 });
 
 Route::post('/integrations/wp/applications', WpApplicationIngestController::class)
+    ->middleware('throttle:wp-ingest')
     ->name('integrations.wp.applications.ingest');

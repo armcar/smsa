@@ -3,7 +3,7 @@
 <html lang="pt">
 
 <head>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
     <title>Recibo {{ $receipt->numero }}</title>
 
     <style>
@@ -17,7 +17,7 @@
         }
 
         body {
-            font-family: DejaVu Serif, serif;
+            font-family: DejaVu Sans, sans-serif;
             font-size: 12px;
             color: #111;
         }
@@ -173,10 +173,27 @@
             font-size: 9px;
             color: #666;
         }
+
+        .watermark-anulado {
+            position: fixed;
+            top: 42%;
+            left: 10%;
+            right: 10%;
+            text-align: center;
+            font-size: 64px;
+            font-weight: 700;
+            color: rgba(220, 38, 38, 0.22);
+            transform: rotate(-24deg);
+            z-index: 999;
+            letter-spacing: 2px;
+        }
     </style>
 </head>
 
 <body>
+    @if (!empty($receipt->anulado_em))
+        <div class="watermark-anulado">ANULADO</div>
+    @endif
 
     <div class="header">
         <table class="header-table">
@@ -189,7 +206,7 @@
                 <td class="doc-box">
                     <div class="doc-title">RECIBO</div>
                     <div class="doc-meta">
-                        <div><b>Nº:</b> {{ $receipt->numero }}</div>
+                        <div><b>Recibo Nº:</b> {{ $receipt->numero }}</div>
                         <div><b>Data:</b> {{ \Carbon\Carbon::parse($receipt->data_pagamento)->format('d-m-Y') }}</div>
                     </div>
                 </td>
@@ -244,14 +261,14 @@
         <thead>
             <tr>
                 <th>Descrição</th>
-                <th class="center" style="width: 110px;">Ano</th>
+                <th class="center" style="width: 160px;">Quota</th>
                 <th class="right" style="width: 120px;">Valor</th>
             </tr>
         </thead>
         <tbody>
             <tr>
                 <td>Quota anual</td>
-                <td class="center">{{ $receipt->quotaYear->ano ?? ($receipt->quota_year_id ?? '—') }}</td>
+                <td class="center">Quota do ano {{ $receipt->quotaYear->ano ?? ($receipt->quota_year_id ?? '—') }}</td>
                 <td class="right">{{ number_format((float) ($receipt->valor ?? 0), 2, ',', '.') }} €</td>
             </tr>
         </tbody>

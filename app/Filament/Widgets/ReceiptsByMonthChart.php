@@ -23,6 +23,7 @@ class ReceiptsByMonthChart extends ChartWidget
         $data = array_fill(0, 12, 0);
 
         $rows = Receipt::query()
+            ->whereNull('anulado_em')
             ->where('ano', $ano)
             ->selectRaw('MONTH(data_pagamento) as m, COUNT(*) as c')
             ->groupBy('m')
