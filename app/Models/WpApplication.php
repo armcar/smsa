@@ -59,6 +59,14 @@ class WpApplication extends Model
         $payload = (array) $this->payload;
         $nome = trim((string) $this->resolveNameFromPayload($payload));
         $nif = $this->resolveNifFromPayload($payload);
+        $targetTypeCode = strtoupper((string) ($this->target_socio_type_code ?: $this->defaultTargetSocioTypeCode()));
+        $tipo = SocioType::query()->where('code', $targetTypeCode)->first() ?? SocioType::query()->orderBy('id')->first();
+        $requestedNumber = (int) ($this->target_num_socio ?? 0);
+
+        if (! $tipo) {
+            $this->appendResolutionNote('Auto-criacao de socio falhou: nao existe socio_type configurado.');
+            return;
+        }
 
         if ($nome === '') {
             $this->appendResolutionNote('Auto-criacao de socio falhou: nome em falta no payload.');
@@ -89,18 +97,15 @@ class WpApplication extends Model
                 ->first();
         }
 
-        if ($existing) {
+        if ($existing && $this->shouldAssociateExistingSocio($existing, $tipo->id, $requestedNumber)) {
             $this->imported_socio_id = $existing->id;
             $this->appendResolutionNote("Socio ja existente associado automaticamente (ID {$existing->id}).");
             $this->save();
             return;
         }
 
-        $targetTypeCode = strtoupper((string) ($this->target_socio_type_code ?: $this->defaultTargetSocioTypeCode()));
-        $tipo = SocioType::query()->where('code', $targetTypeCode)->first() ?? SocioType::query()->orderBy('id')->first();
-        if (! $tipo) {
-            $this->appendResolutionNote('Auto-criacao de socio falhou: nao existe socio_type configurado.');
-            return;
+        if ($existing) {
+            $this->appendResolutionNote("Correspondencia com socio existente (ID {$existing->id}) ignorada para evitar captura indevida; foi mantida criacao de novo socio.");
         }
 
         if ($nif === null) {
@@ -111,7 +116,6 @@ class WpApplication extends Model
 
         $instrumento = trim((string) ($this->resolvePayloadValue($payload, ['instrumento'], '') ?? ''));
         $isInstrumentista = $instrumento !== '';
-        $requestedNumber = (int) ($this->target_num_socio ?? 0);
         $resolvedTargetNumber = 0;
 
         try {
@@ -169,9 +173,16 @@ class WpApplication extends Model
         } catch (QueryException $e) {
             $sqlState = (string) ($e->errorInfo[0] ?? '');
             $errorCode = (string) ($e->errorInfo[1] ?? '');
+            $message = mb_strtolower((string) $e->getMessage());
 
             if ($sqlState === '23000' || $errorCode === '1062') {
-                $this->appendResolutionNote('Auto-criacao de socio bloqueada: conflito de unicidade na numeracao.');
+                if (str_contains($message, 'socios_email_unique') || str_contains($message, 'for key \'socios_email_unique\'')) {
+                    $this->appendResolutionNote('Auto-criacao de socio bloqueada: email ja existe noutro socio.');
+                } elseif (str_contains($message, 'socios_type_num_unique') || str_contains($message, 'num_socio')) {
+                    $this->appendResolutionNote('Auto-criacao de socio bloqueada: conflito de unicidade na numeracao.');
+                } else {
+                    $this->appendResolutionNote('Auto-criacao de socio bloqueada: conflito de unicidade.');
+                }
                 $this->save();
                 return;
             }
@@ -199,6 +210,19 @@ class WpApplication extends Model
     private function defaultTargetSocioTypeCode(): string
     {
         return $this->kind === 'escola' ? 'A' : 'B';
+    }
+
+    private function shouldAssociateExistingSocio(Socio $existing, int $targetTypeId, int $requestedNumber): bool
+    {
+        if ((int) $existing->socio_type_id !== $targetTypeId) {
+            return false;
+        }
+
+        if ($requestedNumber > 0 && (int) $existing->num_socio !== $requestedNumber) {
+            return false;
+        }
+
+        return true;
     }
 
     private function resolveNameFromPayload(array $payload): string

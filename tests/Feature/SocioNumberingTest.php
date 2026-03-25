@@ -79,4 +79,39 @@ class SocioNumberingTest extends TestCase
         $this->assertSame(1, Socio::query()->where('socio_type_id', $typeB->id)->where('num_socio', 10)->count());
         $this->assertSame(1, Socio::query()->where('socio_type_id', $typeB->id)->where('num_socio', 11)->count());
     }
+
+    public function test_validacao_com_numero_alvo_nao_captura_socio_existente_apenas_por_email_ou_nif(): void
+    {
+        $typeB = SocioTypeFactory::new()->create(['code' => 'B', 'nome' => 'Benfeitor']);
+
+        $existing = SocioFactory::new()->forType($typeB)->create([
+            'num_socio' => 1,
+            'nome' => 'Socio Antigo',
+            'email' => 'antigo@example.org',
+            'numero_fiscal' => '123123123',
+        ]);
+
+        $app = WpApplication::query()->create([
+            'source' => 'wordpress',
+            'kind' => 'socio',
+            'external_id' => 'num-3',
+            'status' => 'validada',
+            'submitted_at' => now(),
+            'payload' => [
+                'nome' => 'Novo Pedido',
+                'email' => 'novo.b008@example.org',
+                'numero_fiscal' => '123123123',
+                'data_nascimento' => '1992-03-03',
+            ],
+            'target_socio_type_code' => 'B',
+            'target_num_socio' => 8,
+        ]);
+
+        $app->tryAutoCreateSocioOnValidation();
+        $app->refresh();
+
+        $this->assertNotNull($app->imported_socio_id);
+        $this->assertNotSame($existing->id, (int) $app->imported_socio_id);
+        $this->assertSame(8, (int) $app->importedSocio->num_socio);
+    }
 }

@@ -353,20 +353,9 @@ class WpApplicationResource extends Resource
                     ->badge()
                     ->sortable(),
 
-                TextColumn::make('external_id')
-                    ->label('ID WP')
-                    ->sortable(),
-
                 TextColumn::make('imported_socio_id')
                     ->label('Socio ID')
                     ->sortable()
-                    ->toggleable(),
-                TextColumn::make('target_socio_type_code')
-                    ->label('Tipo alvo')
-                    ->badge()
-                    ->toggleable(),
-                TextColumn::make('target_num_socio')
-                    ->label('Num alvo')
                     ->toggleable(),
 
                 TextColumn::make('submitted_at')

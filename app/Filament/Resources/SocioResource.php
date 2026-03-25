@@ -11,6 +11,7 @@ use App\Support\TablePdfExport;
 use App\Support\Nif;
 use Carbon\Carbon;
 use Filament\Actions\Exports\Enums\ExportFormat;
+use Filament\Notifications\Notification;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Placeholder;
@@ -22,9 +23,11 @@ use Filament\Forms\Get;
 use Filament\Forms\Set;
 use Filament\Resources\Resource;
 use Filament\Tables;
+use Filament\Tables\Actions\Action;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\Filter;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Validation\Rule;
 
@@ -183,6 +186,9 @@ class SocioResource extends Resource
             TextInput::make('email')
                 ->label('Email')
                 ->email()
+                ->rules([
+                    fn (?Socio $record) => Rule::unique('socios', 'email')->ignore($record?->id),
+                ])
                 ->maxLength(255)
                 ->nullable(),
 
@@ -300,8 +306,34 @@ class SocioResource extends Resource
                     ->label('Data Socio')
                     ->date('d-m-Y')
                     ->sortable(),
+
+                TextColumn::make('estado_atividade')
+                    ->label('Atividade')
+                    ->state(fn (Socio $record): string => $record->isAtivo() ? 'ativo' : 'inativo')
+                    ->badge()
+                    ->color(fn (string $state): string => $state === 'ativo' ? 'success' : 'warning')
+                    ->formatStateUsing(fn (string $state): string => $state === 'ativo' ? 'Ativo' : 'Inativo'),
             ])
             ->filters([
+                SelectFilter::make('atividade')
+                    ->label('Atividade')
+                    ->options([
+                        'ativo' => 'Ativo',
+                        'inativo' => 'Inativo',
+                    ])
+                    ->query(function ($query, array $data) {
+                        $value = $data['value'] ?? null;
+
+                        if ($value === 'ativo') {
+                            return $query->where('estado', 'ativo');
+                        }
+
+                        if ($value === 'inativo') {
+                            return $query->where('estado', '!=', 'ativo');
+                        }
+
+                        return $query;
+                    }),
                 Filter::make('instrumentistas_ativos')
                     ->label('Instrumentistas ativos')
                     ->query(fn ($query) => $query
@@ -362,12 +394,38 @@ class SocioResource extends Resource
             ->defaultSort('num_socio', 'asc')
             ->actions([
                 Tables\Actions\EditAction::make(),
+                Action::make('inativar')
+                    ->label('Inativar')
+                    ->icon('heroicon-o-pause-circle')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->visible(fn (Socio $record): bool => $record->isAtivo())
+                    ->action(function (Socio $record): void {
+                        $record->inativar();
+
+                        Notification::make()
+                            ->title('Socio inativado com sucesso.')
+                            ->success()
+                            ->send();
+                    }),
+                Action::make('reativar')
+                    ->label('Reativar')
+                    ->icon('heroicon-o-play-circle')
+                    ->color('success')
+                    ->requiresConfirmation()
+                    ->visible(fn (Socio $record): bool => ! $record->isAtivo())
+                    ->action(function (Socio $record): void {
+                        $record->reativar();
+
+                        Notification::make()
+                            ->title('Socio reativado com sucesso.')
+                            ->success()
+                            ->send();
+                    }),
+                Tables\Actions\DeleteAction::make()
+                    ->visible(fn (Socio $record): bool => ! $record->hasMovimentos()),
             ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
-            ]);
+            ->bulkActions([]);
     }
 
     public static function getPages(): array
