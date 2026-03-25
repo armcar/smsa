@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\WpApplication;
+use App\Models\Socio;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -68,6 +69,12 @@ class WpApplicationIngestController extends Controller
             ->first();
 
         $deduplicatedByPayload = false;
+        $deduplicatedByMember = false;
+
+        if (! $application) {
+            $application = $this->findExistingMemberApplication($data['kind'], $data['payload']);
+            $deduplicatedByMember = $application !== null;
+        }
 
         if (! $application) {
             $application = WpApplication::query()
@@ -124,7 +131,9 @@ class WpApplicationIngestController extends Controller
                 'application_id' => $application->id,
                 'kind' => $application->kind,
                 'external_id' => $application->external_id,
-                'strategy' => $deduplicatedByPayload ? 'payload_hash' : 'external_id',
+                'strategy' => $deduplicatedByMember
+                    ? 'member_socio'
+                    : ($deduplicatedByPayload ? 'payload_hash' : 'external_id'),
             ]);
         }
 
@@ -135,7 +144,35 @@ class WpApplicationIngestController extends Controller
             'id' => $application->id,
             'status' => $application->status,
             'deduplicated' => $deduplicatedByPayload,
+            'deduplicated_by_member' => $deduplicatedByMember,
         ], $statusCode);
+    }
+
+    private function findExistingMemberApplication(string $kind, array $payload): ?WpApplication
+    {
+        if ($kind !== 'socio') {
+            return null;
+        }
+
+        $wpUserId = (int) ($payload['wp_member_user_id'] ?? 0);
+        if ($wpUserId <= 0) {
+            return null;
+        }
+
+        $socio = Socio::query()
+            ->where('wp_user_id', $wpUserId)
+            ->first();
+
+        if (! $socio) {
+            return null;
+        }
+
+        return WpApplication::query()
+            ->where('source', 'wordpress')
+            ->where('kind', 'socio')
+            ->where('imported_socio_id', $socio->id)
+            ->latest('id')
+            ->first();
     }
 
     private function extractDisplayName(string $kind, array $payload): ?string
