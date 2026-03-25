@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class WpApplicationIngestController extends Controller
 {
@@ -96,23 +97,52 @@ class WpApplicationIngestController extends Controller
             'display_email' => $displayEmail,
             'wp_status_callback_url' => $data['wp_status_callback_url'] ?? null,
         ];
+        $isMemberUpdate = $this->isMemberUpdateSubmission($data['kind'], $data['payload']);
+        if ($isMemberUpdate) {
+            $attributes['status'] = 'pendente';
+            $attributes['resolved_at'] = null;
+        }
 
         $created = false;
 
-        if ($application) {
-            $application->fill($attributes + [
-                'source' => 'wordpress',
+        try {
+            DB::transaction(function () use (
+                &$application,
+                &$created,
+                $attributes,
+                $data,
+                $isMemberUpdate
+            ): void {
+                if ($application) {
+                    $application->fill($attributes + [
+                        'source' => 'wordpress',
+                        'kind' => $data['kind'],
+                        'external_id' => $data['external_id'],
+                    ])->save();
+                } else {
+                    $application = WpApplication::query()->create($attributes + [
+                        'source' => 'wordpress',
+                        'kind' => $data['kind'],
+                        'external_id' => $data['external_id'],
+                    ]);
+
+                    $created = true;
+                }
+
+                if ($isMemberUpdate) {
+                    $this->applyMemberUpdateToSocio($application, $data['payload']);
+                }
+            });
+        } catch (\Throwable $e) {
+            Log::error('WP ingest member update failed.', [
                 'kind' => $data['kind'],
                 'external_id' => $data['external_id'],
-            ])->save();
-        } else {
-            $application = WpApplication::query()->create($attributes + [
-                'source' => 'wordpress',
-                'kind' => $data['kind'],
-                'external_id' => $data['external_id'],
+                'error' => $e->getMessage(),
             ]);
 
-            $created = true;
+            return response()->json([
+                'message' => 'Falha ao aplicar atualização de dados do sócio.',
+            ], 422);
         }
 
         $application->refresh();
@@ -145,7 +175,120 @@ class WpApplicationIngestController extends Controller
             'status' => $application->status,
             'deduplicated' => $deduplicatedByPayload,
             'deduplicated_by_member' => $deduplicatedByMember,
+            'member_update' => $isMemberUpdate,
         ], $statusCode);
+    }
+
+    private function isMemberUpdateSubmission(string $kind, array $payload): bool
+    {
+        if ($kind !== 'socio') {
+            return false;
+        }
+
+        $mode = mb_strtolower(trim((string) ($payload['wp_submission_mode'] ?? '')));
+        if ($mode !== 'update') {
+            return false;
+        }
+
+        return (int) ($payload['wp_member_user_id'] ?? 0) > 0;
+    }
+
+    private function applyMemberUpdateToSocio(WpApplication $application, array $payload): void
+    {
+        $wpUserId = (int) ($payload['wp_member_user_id'] ?? 0);
+        if ($wpUserId <= 0) {
+            return;
+        }
+
+        $socio = Socio::query()
+            ->where('wp_user_id', $wpUserId)
+            ->first();
+
+        if (! $socio) {
+            throw new \RuntimeException('Sócio não encontrado para atualização imediata.');
+        }
+
+        $numeroFiscal = $this->resolveNifFromPayload($payload);
+        if ($numeroFiscal === null) {
+            throw new \RuntimeException('NIF inválido na atualização de dados.');
+        }
+
+        $birthDate = $this->resolvePayloadValue($payload, ['data_nascimento', 'data_nasc']);
+        if (is_string($birthDate)) {
+            $birthDate = trim($birthDate);
+            if (preg_match('/^\d{2}\/\d{2}\/\d{4}$/', $birthDate) === 1) {
+                [$d, $m, $y] = explode('/', $birthDate);
+                $birthDate = sprintf('%04d-%02d-%02d', (int) $y, (int) $m, (int) $d);
+            }
+        }
+
+        $socio->fill([
+            'nome' => trim((string) ($payload['nome'] ?? $socio->nome)),
+            'morada' => $this->resolvePayloadValue($payload, ['morada'], $socio->morada),
+            'codigo_postal' => $this->resolvePayloadValue($payload, ['codigo_postal', 'cod_postal'], $socio->codigo_postal),
+            'localidade' => $this->resolvePayloadValue($payload, ['localidade'], $socio->localidade),
+            'telefone' => $this->resolvePayloadValue($payload, ['telefone'], $socio->telefone),
+            'telemovel' => $this->resolvePayloadValue($payload, ['telemovel'], $socio->telemovel),
+            'data_nascimento' => $birthDate ?: $socio->data_nascimento,
+            'numero_fiscal' => $numeroFiscal,
+            'email' => trim((string) ($payload['email'] ?? $socio->email)),
+            'estado' => 'ativo',
+        ])->save();
+
+        $application->imported_socio_id = $socio->id;
+        $application->resolution_notes = $this->buildMemberUpdateNote($payload);
+        $application->save();
+    }
+
+    private function buildMemberUpdateNote(array $payload): string
+    {
+        $when = now()->format('d/m/Y H:i');
+        $who = trim((string) ($payload['wp_member_login'] ?? 'utilizador'));
+
+        return "Atualizacao de dados efetuada em {$when} pelo utilizador {$who}";
+    }
+
+    private function resolvePayloadValue(array $payload, array $keys, mixed $default = null): mixed
+    {
+        foreach ($keys as $key) {
+            if (! array_key_exists($key, $payload)) {
+                continue;
+            }
+
+            $value = $payload[$key];
+            if ($value === null) {
+                continue;
+            }
+
+            if (is_string($value) && trim($value) === '') {
+                continue;
+            }
+
+            return $value;
+        }
+
+        return $default;
+    }
+
+    private function resolveNifFromPayload(array $payload): ?string
+    {
+        $candidates = [
+            $payload['numero_fiscal'] ?? null,
+            $payload['nif'] ?? null,
+        ];
+
+        foreach ($candidates as $raw) {
+            if (! is_string($raw) && ! is_numeric($raw)) {
+                continue;
+            }
+
+            $digits = preg_replace('/\D+/', '', (string) $raw);
+            if (is_string($digits) && strlen($digits) === 9) {
+                return $digits;
+            }
+        }
+
+        return null;
     }
 
     private function findExistingMemberApplication(string $kind, array $payload): ?WpApplication
