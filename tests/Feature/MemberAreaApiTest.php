@@ -122,11 +122,15 @@ class MemberAreaApiTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('member.name', $socioA->nome)
+            ->assertJsonPath('profile.name', $socioA->nome)
+            ->assertJsonPath('data.profile.name', $socioA->nome)
             ->assertJsonCount(1, 'data.payments')
             ->assertJsonCount(1, 'data.receipts')
             ->assertJsonPath('data.payments.0.amount', 24)
             ->assertJsonPath('data.payments.0.method', 'mbway')
-            ->assertJsonPath('data.quota.status', 'pago');
+            ->assertJsonPath('data.quota.status', 'pago')
+            ->assertJsonMissingPath('profile.wp_user_id')
+            ->assertJsonMissingPath('data.profile.wp_user_id');
     }
 
     public function test_recibo_download_nao_permite_troca_de_wp_user_id_no_link_assinado(): void

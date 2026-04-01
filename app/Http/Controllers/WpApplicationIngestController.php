@@ -14,16 +14,29 @@ class WpApplicationIngestController extends Controller
 {
     public function __invoke(Request $request): JsonResponse
     {
-        $expectedToken = (string) config('services.wp_bridge.token');
-        $receivedToken = (string) $request->header('X-WP-Bridge-Token', '');
+        $receivedToken = trim((string) (
+            $request->header('X-SMSA-Ingest-Secret', '')
+            ?: $request->header('X-WP-Bridge-Token', '')
+        ));
 
-        if ($expectedToken === '' || ! hash_equals($expectedToken, $receivedToken)) {
+        if (! $this->isValidIngestSecret($receivedToken)) {
             Log::warning('WP ingest rejected: invalid integration token.', [
                 'ip' => $request->ip(),
                 'external_id' => (string) $request->input('external_id', ''),
             ]);
 
             return response()->json(['message' => 'Unauthorized integration token.'], 401);
+        }
+
+        if (! $this->isAllowedIngestOrigin($request)) {
+            Log::warning('WP ingest rejected: origin host not allowed.', [
+                'ip' => $request->ip(),
+                'origin' => (string) $request->header('Origin', ''),
+                'referer' => (string) $request->header('Referer', ''),
+                'external_id' => (string) $request->input('external_id', ''),
+            ]);
+
+            return response()->json(['message' => 'Origin host is not allowed.'], 403);
         }
 
         $data = $request->validate([
@@ -360,5 +373,81 @@ class WpApplicationIngestController extends Controller
         }
 
         return $payload;
+    }
+
+    private function isValidIngestSecret(string $receivedToken): bool
+    {
+        if ($receivedToken === '') {
+            return false;
+        }
+
+        foreach ($this->resolveAcceptedIngestSecrets() as $candidate) {
+            if ($candidate !== '' && hash_equals($candidate, $receivedToken)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function resolveAcceptedIngestSecrets(): array
+    {
+        $primary = trim((string) config('services.wp_bridge.ingest_shared_secret', ''));
+        $legacy = trim((string) config('services.wp_bridge.token', ''));
+        $previous = array_map('trim', (array) config('services.wp_bridge.ingest_previous_shared_secrets', []));
+
+        return array_values(array_unique(array_filter([
+            $primary,
+            ...$previous,
+            $legacy,
+        ], static fn (string $secret): bool => $secret !== '')));
+    }
+
+    private function isAllowedIngestOrigin(Request $request): bool
+    {
+        $allowedHosts = array_map(
+            static fn (string $host): string => mb_strtolower(trim($host)),
+            (array) config('services.wp_bridge.allowed_ingest_hosts', [])
+        );
+        $allowedHosts = array_values(array_filter($allowedHosts, static fn (string $host): bool => $host !== ''));
+
+        if ($allowedHosts === []) {
+            return true;
+        }
+
+        $originHost = $this->extractHostFromHeader($request->header('Origin'));
+        $refererHost = $this->extractHostFromHeader($request->header('Referer'));
+
+        // wp_remote_post may omit Origin/Referer; keep compatibility and rely on secret auth.
+        if ($originHost === null && $refererHost === null) {
+            return true;
+        }
+
+        if ($originHost !== null && in_array($originHost, $allowedHosts, true)) {
+            return true;
+        }
+
+        if ($refererHost !== null && in_array($refererHost, $allowedHosts, true)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function extractHostFromHeader(?string $url): ?string
+    {
+        if (! is_string($url) || trim($url) === '') {
+            return null;
+        }
+
+        $host = parse_url(trim($url), PHP_URL_HOST);
+        if (! is_string($host) || $host === '') {
+            return null;
+        }
+
+        return mb_strtolower($host);
     }
 }

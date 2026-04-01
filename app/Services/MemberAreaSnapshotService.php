@@ -11,9 +11,29 @@ use Illuminate\Support\Facades\URL;
 
 class MemberAreaSnapshotService
 {
+    public function buildProfile(Socio $socio): array
+    {
+        $status = (string) ($socio->estado ?? '');
+
+        return [
+            'name' => (string) ($socio->nome ?? ''),
+            'email' => (string) ($socio->email ?? ''),
+            'nif' => (string) ($socio->numero_fiscal ?? ''),
+            'phone' => (string) ($socio->telefone ?? ''),
+            'mobile' => (string) ($socio->telemovel ?? ''),
+            'address' => (string) ($socio->morada ?? ''),
+            'postal_code' => (string) ($socio->codigo_postal ?? ''),
+            'city' => (string) ($socio->localidade ?? ''),
+            'status' => $status,
+            'status_label' => $this->memberStatusLabel($status),
+            'member_since' => optional($socio->data_socio)->format('Y-m-d'),
+        ];
+    }
+
     public function buildForSocio(Socio $socio): array
     {
         return [
+            'profile' => $this->buildProfile($socio),
             'quota' => $this->buildQuotaState($socio),
             'payments' => $this->buildPayments($socio),
             'receipts' => $this->buildReceipts($socio),
@@ -33,7 +53,7 @@ class MemberAreaSnapshotService
                 'amount' => null,
                 'status' => 'sem_definicao',
                 'amount_due' => null,
-                'message' => 'Ainda não existem quotas definidas para o ano corrente.',
+                'message' => 'Ainda nao existem quotas definidas para o ano corrente.',
             ];
         }
 
@@ -110,9 +130,19 @@ class MemberAreaSnapshotService
     {
         return match (mb_strtolower(trim($method))) {
             'mbway' => 'MBWay',
-            'transferencia', 'transferência' => 'Transferência',
+            'transferencia', 'transfer�ncia' => 'Transferencia',
             'dinheiro' => 'Dinheiro',
-            default => trim($method) !== '' ? ucfirst($method) : 'Não definido',
+            default => trim($method) !== '' ? ucfirst($method) : 'Nao definido',
+        };
+    }
+
+    private function memberStatusLabel(string $status): string
+    {
+        return match (mb_strtolower(trim($status))) {
+            'ativo' => 'Ativo',
+            'suspenso' => 'Suspenso',
+            'inativo' => 'Inativo',
+            default => 'Sem estado definido',
         };
     }
 }

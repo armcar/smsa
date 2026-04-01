@@ -12,9 +12,9 @@ class ValidateWordPressMemberAreaRequest
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $secret = $this->resolveSharedSecret();
-        if ($secret === null) {
-            return $this->unauthorized('Integração indisponível.');
+        $secrets = $this->resolveSharedSecrets();
+        if ($secrets === []) {
+            return $this->unauthorized('Integracao indisponivel.');
         }
 
         $wpUserId = (int) $request->header('X-SMSA-WP-User-ID', 0);
@@ -22,7 +22,7 @@ class ValidateWordPressMemberAreaRequest
         $signature = (string) $request->header('X-SMSA-Signature', '');
 
         if ($wpUserId <= 0 || $timestamp <= 0 || $signature === '') {
-            return $this->unauthorized('Pedido inválido.');
+            return $this->unauthorized('Pedido invalido.');
         }
 
         $maxDrift = (int) config('wordpress.member_area_max_drift_seconds', 300);
@@ -37,9 +37,8 @@ class ValidateWordPressMemberAreaRequest
             (string) $wpUserId,
         ]);
 
-        $expectedSignature = hash_hmac('sha256', $payload, $secret);
-        if (! hash_equals($expectedSignature, $signature)) {
-            return $this->unauthorized('Assinatura inválida.');
+        if (! $this->hasValidSignature($payload, $signature, $secrets)) {
+            return $this->unauthorized('Assinatura invalida.');
         }
 
         $socio = Socio::query()
@@ -48,7 +47,7 @@ class ValidateWordPressMemberAreaRequest
             ->first();
 
         if (! $socio) {
-            return $this->unauthorized('Sócio não encontrado.');
+            return $this->unauthorized('Socio nao encontrado.');
         }
 
         $request->attributes->set('member_socio', $socio);
@@ -57,15 +56,35 @@ class ValidateWordPressMemberAreaRequest
         return $next($request);
     }
 
-    private function resolveSharedSecret(): ?string
+    /**
+     * @return array<int, string>
+     */
+    private function resolveSharedSecrets(): array
     {
-        $secret = trim((string) config('wordpress.member_area_shared_secret', ''));
-        if ($secret !== '') {
-            return $secret;
+        $primary = trim((string) config('wordpress.member_area_shared_secret', ''));
+        $previous = array_map('trim', (array) config('wordpress.member_area_previous_shared_secrets', []));
+        $legacyBridgeToken = trim((string) config('services.wp_bridge.token', ''));
+
+        return array_values(array_unique(array_filter([
+            $primary,
+            ...$previous,
+            $legacyBridgeToken,
+        ], static fn (string $secret): bool => $secret !== '')));
+    }
+
+    /**
+     * @param array<int, string> $secrets
+     */
+    private function hasValidSignature(string $payload, string $signature, array $secrets): bool
+    {
+        foreach ($secrets as $secret) {
+            $expected = hash_hmac('sha256', $payload, $secret);
+            if (hash_equals($expected, $signature)) {
+                return true;
+            }
         }
 
-        $legacyBridgeToken = trim((string) config('services.wp_bridge.token', ''));
-        return $legacyBridgeToken !== '' ? $legacyBridgeToken : null;
+        return false;
     }
 
     private function unauthorized(string $message): JsonResponse
@@ -75,3 +94,4 @@ class ValidateWordPressMemberAreaRequest
         ], 401);
     }
 }
+

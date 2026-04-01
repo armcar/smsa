@@ -13,12 +13,14 @@ class MemberAreaController extends Controller
     {
         $socio = $request->attributes->get('member_socio');
         abort_unless($socio instanceof Socio, 401);
+        $profile = $snapshotService->buildProfile($socio);
 
         return response()->json([
             'member' => [
                 'number' => (int) $socio->num_socio,
                 'name' => (string) $socio->nome,
             ],
+            'profile' => $profile,
             'data' => $snapshotService->buildForSocio($socio),
         ]);
     }

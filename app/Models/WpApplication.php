@@ -308,7 +308,7 @@ class WpApplication extends Model
             return;
         }
 
-        $token = (string) config('services.wp_bridge.token');
+        $token = $this->resolveInternalCallbackSecret();
         if ($token === '') {
             Log::warning('WP callback skipped: token not configured.', [
                 'wp_application_id' => $this->id,
@@ -326,11 +326,12 @@ class WpApplication extends Model
 
             $response = Http::timeout(10)
                 ->withOptions([
-                    'verify' => (bool) config('services.wp_bridge.verify_ssl', true),
+                    'verify' => $this->shouldVerifySslForCallback(),
                 ])
                 ->acceptJson()
                 ->asJson()
                 ->withHeaders([
+                    'X-SMSA-Internal-Callback-Secret' => $token,
                     'X-WP-Bridge-Token' => $token,
                 ])
                 ->post($this->wp_status_callback_url, [
@@ -378,5 +379,27 @@ class WpApplication extends Model
         }
 
         return in_array(mb_strtolower($host), array_map('mb_strtolower', $allowedHosts), true);
+    }
+
+    private function resolveInternalCallbackSecret(): string
+    {
+        $secret = trim((string) config('services.wp_bridge.internal_callback_secret', ''));
+        if ($secret !== '') {
+            return $secret;
+        }
+
+        return trim((string) config('services.wp_bridge.token', ''));
+    }
+
+    private function shouldVerifySslForCallback(): bool
+    {
+        $verify = (bool) config('services.wp_bridge.verify_ssl', true);
+        $enforceInProd = (bool) config('services.wp_bridge.enforce_ssl_verify_in_production', true);
+
+        if ($enforceInProd && app()->environment('production')) {
+            return true;
+        }
+
+        return $verify;
     }
 }
